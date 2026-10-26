@@ -93,8 +93,8 @@ input[dir=ltr]{text-align:left}
 .rfile{display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--line)}
 .rfile .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;direction:ltr;text-align:right}
 .rfile .sz{color:var(--muted);font-size:12px}
-.tgwarn{display:none;font-size:12.5px;color:var(--muted);margin-top:10px}
-body.tg .tgwarn{display:block}
+.ok{display:none;background:color-mix(in srgb,var(--accent) 14%,var(--card));border-radius:10px;padding:10px 12px;font-size:14px;margin-top:10px}
+.ok.on{display:block}
 
 /* Busy overlay + modal */
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:50;padding:16px}
@@ -118,7 +118,7 @@ body.tg .tgwarn{display:block}
   <!-- HOME -->
   <section id="home" class="panel on">
     <div class="grid" id="grid"></div>
-    <p class="note">كل المعالجة تتم داخل جهازك، ولا يُرفع أي ملف إلى أي خادم.</p>
+    <p class="note">كل المعالجة تتم داخل جهازك. الحد الأقصى لحجم الملف 50 ميغابايت.</p>
   </section>
 
   <!-- TOOL HOST -->
@@ -128,11 +128,11 @@ body.tg .tgwarn{display:block}
     <div class="result" id="result">
       <h3>الملف جاهز</h3>
       <div id="rfiles"></div>
-      <button class="btn" id="shareAll">مشاركة / حفظ</button>
+      <button class="btn hide" id="sendChat">إرسال إلى المحادثة</button>
+      <div class="ok" id="sentMsg"></div>
+      <button class="btn sec" id="shareAll">مشاركة / حفظ</button>
       <button class="btn sec" id="dlAll">تنزيل</button>
       <button class="btn sec hide" id="zipAll">تنزيل الكل كملف ZIP</button>
-      <button class="btn sec" id="openBrowser">فتح الأداة في المتصفح</button>
-      <p class="tgwarn">إذا لم يعمل الحفظ داخل تيليجرام، اضغط «فتح الأداة في المتصفح» وأعد العملية هناك، فالتنزيل يعمل دائماً في المتصفح.</p>
     </div>
   </section>
 </div>
@@ -329,6 +329,7 @@ function addImagePage(doc, img, mode, index) {
 const pdfOut = async (doc, name) => ({ name, blob: new Blob([await doc.save()], { type: 'application/pdf' }) });
 const SIZES = { A3: PageSizes.A3, A4: PageSizes.A4, A5: PageSizes.A5, Letter: PageSizes.Letter, Legal: PageSizes.Legal };
 const mm = v => v * 72 / 25.4;
+const MAX_FILE = 50 * 1024 * 1024;
 
 /* ================= OPERATIONS (pure: files/options in → files out) ================= */
 const OPS = {
@@ -548,6 +549,9 @@ function filePicker(label, accept, multiple, onChange) {
   const inp = $('input', el);
   inp.onchange = () => {
     const files = [...inp.files]; if (!files.length) return;
+    const big = files.find(f => f.size > MAX_FILE);
+    if (big) { inp.value = ''; showErr('حجم «' + big.name + '» ' + fmtSize(big.size) + '، والحد الأقصى 50 ميغابايت.'); return; }
+    showErr('');
     if (!multiple) { el.classList.add('has'); const sp = $('span', el); sp.textContent = '📄 '; const b = document.createElement('bdi'); b.textContent = files[0].name; sp.appendChild(b); }
     onChange(multiple ? files : files[0]); inp.value = '';
   };
@@ -816,12 +820,16 @@ function showResult(files) {
   const box = $('#rfiles'); box.innerHTML = '';
   $('#result h3').textContent = files.length > 1 ? 'جاهز: ' + files.length + ' ملفات' : 'الملف جاهز';
   files.forEach(f => {
-    const r = h(`<div class="rfile"><span class="nm"></span><span class="sz">${fmtSize(f.blob.size)}</span><button class="mini" type="button">حفظ</button></div>`);
+    const r = h(`<div class="rfile"><span class="nm"></span><span class="sz">${fmtSize(f.blob.size)}${f.blob.size > MAX_FILE ? ' ⚠️' : ''}</span><button class="mini" type="button">حفظ</button></div>`);
     $('.nm', r).textContent = f.name;
     $('button', r).onclick = () => saveFiles([f]);
     box.appendChild(r);
   });
   $('#zipAll').classList.toggle('hide', files.length < 2);
+  $('#sendChat').classList.toggle('hide', !canSend());
+  $('#sendChat').textContent = files.length > 1 ? 'إرسال الكل إلى المحادثة' : 'إرسال إلى المحادثة';
+  $('#shareAll').classList.toggle('sec', canSend());
+  $('#sentMsg').classList.remove('on');
   $('#shareAll').textContent = files.length > 1 ? 'مشاركة / حفظ الكل' : 'مشاركة / حفظ';
   $('#dlAll').textContent = files.length > 1 ? 'تنزيل الكل' : 'تنزيل';
   $('#result').classList.add('on');
@@ -849,11 +857,41 @@ $('#zipAll').onclick = async () => {
   try { const z = new JSZip(); results.forEach(f => z.file(f.name, f.blob)); const blob = await z.generateAsync({ type: 'blob' }); download([{ name: 'files.zip', blob }]); }
   catch (e) { handleErr(e); } finally { busy(false); }
 };
-$('#openBrowser').onclick = () => {
-  const url = location.href.split('#')[0];
-  if (inTG) TG.openLink(url, { try_instant_view: false }); else window.open(url, '_blank');
-};
-if (!inTG) $('#openBrowser').classList.add('hide');
+
+/* ---------- Send to the Telegram chat (via the bot's Serverless endpoint) ---------- */
+const canSend = () => inTG && TG.Serverless && typeof TG.Serverless.call === 'function';
+function callEndpoint(name, input) {
+  return new Promise((resolve, reject) => TG.Serverless.call(name, input, (err, res) => err ? reject(err) : resolve(res)));
+}
+function bytesToB64(b) {
+  let s = ''; for (let i = 0; i < b.length; i += 32768) s += String.fromCharCode.apply(null, b.subarray(i, i + 32768));
+  return btoa(s);
+}
+const CHUNK = 1536 * 1024; /* 1.5 MB per request */
+async function sendToChat(files) {
+  const msg = $('#sentMsg'); msg.classList.remove('on'); showErr('');
+  const tooBig = files.find(f => f.blob.size > MAX_FILE);
+  if (tooBig) { showErr('«' + tooBig.name + '» أكبر من 50 ميغابايت، ولا يمكن إرساله إلى المحادثة. استخدم «تنزيل» بدلاً من ذلك.'); return; }
+  try {
+    for (let k = 0; k < files.length; k++) {
+      const f = files[k], bytes = new Uint8Array(await f.blob.arrayBuffer());
+      const total = Math.max(1, Math.ceil(bytes.length / CHUNK));
+      const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      for (let i = 0; i < total; i++) {
+        busy(true, 'إرسال ' + (files.length > 1 ? 'الملف ' + (k + 1) + ' من ' + files.length + ' — ' : '') + Math.round((i / total) * 100) + '%');
+        await callEndpoint('send_file', { upload_id: id, index: i, total, name: f.name, mime: f.blob.type, chunk: bytesToB64(bytes.subarray(i * CHUNK, (i + 1) * CHUNK)) });
+      }
+    }
+    busy(false);
+    msg.textContent = files.length > 1 ? 'تم إرسال ' + files.length + ' ملفات إلى المحادثة مع البوت.' : 'تم إرسال الملف إلى المحادثة مع البوت.';
+    msg.classList.add('on');
+    if (TG.HapticFeedback) TG.HapticFeedback.notificationOccurred('success');
+  } catch (e) {
+    busy(false);
+    showErr(e && e.type === 'ENDPOINT_ERROR' ? e.message : 'تعذّر الإرسال إلى المحادثة' + (e && e.type ? ' (' + e.type + ')' : '') + '. استخدم «مشاركة / حفظ» أو «تنزيل».');
+  }
+}
+$('#sendChat').onclick = () => sendToChat(results);
 
 /* Exposed for testing */
 window.__app = { OPS, parsePages, compressPages };
