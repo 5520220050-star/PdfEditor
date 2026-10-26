@@ -3,10 +3,10 @@ import { eq, sql } from 'sdk/db';
 import { uploads } from '../schema.js';
 
 const MAX_BYTES = 50 * 1024 * 1024;  // Telegram's limit for bot uploads
-const MAX_PARTS = 400;
+const MAX_PARTS = 5000;
 
 // Called by the mini app once per piece of the file (pieces are base64 text).
-// input: { upload_id, index, total, name, mime, chunk }
+// input: { upload_id, index, last, name, mime, chunk }  (pieces may differ in size)
 export default async function (input, ctx) {
   try { return await handle(input, ctx); }
   catch (e) {
@@ -20,9 +20,10 @@ async function handle(input, ctx) {
   const user = ctx.initData && ctx.initData.user;
   if (!user) throw new EndpointError('افتح المحرر من داخل البوت.');
 
-  const { upload_id, index, total, name, mime, chunk } = input || {};
+  const { upload_id, index, name, mime, chunk } = input || {};
+  const last = input && (input.last === true || (Number.isInteger(input.total) && input.index === input.total - 1));
   if (typeof upload_id !== 'string' || !/^[a-z0-9]{8,40}$/i.test(upload_id)) throw new EndpointError('طلب غير صالح.');
-  if (!Number.isInteger(index) || !Number.isInteger(total) || total < 1 || total > MAX_PARTS || index < 0 || index >= total)
+  if (!Number.isInteger(index) || index < 0 || index >= MAX_PARTS)
     throw new EndpointError('الملف أكبر من الحد المسموح (50 ميغابايت).');
   if (typeof chunk !== 'string') throw new EndpointError('طلب غير صالح.');
 
@@ -34,17 +35,19 @@ async function handle(input, ctx) {
     await db.run(sql`DELETE FROM uploads WHERE created_at < ${hourAgo}`);
   }
 
-  if (total === 1) return send(user.id, name, mime, bytes);
+  if (index === 0 && last) return send(user.id, name, mime, bytes);
 
+  // A retried piece replaces any earlier copy of the same piece.
+  await db.run(sql`DELETE FROM uploads WHERE upload_id = ${upload_id} AND idx = ${index}`);
   await db.insert(uploads).values({ uploadId: upload_id, userId: user.id, idx: index, data: bytes }).run();
-  if (index < total - 1) return { ok: true, received: index + 1 };
+  if (!last) return { ok: true, received: index + 1 };
 
   // Last piece: put the file back together and send it.
   const rows = (await db.select().from(uploads).where(eq(uploads.uploadId, upload_id)).all())
     .filter(r => r.userId === user.id)
     .sort((a, b) => a.idx - b.idx);
   await db.delete(uploads).where(eq(uploads.uploadId, upload_id)).run();
-  if (rows.length !== total) throw new EndpointError('لم تصل كل أجزاء الملف. حاول مرة أخرى.');
+  if (rows.length !== index + 1) throw new EndpointError('لم تصل كل أجزاء الملف. حاول مرة أخرى.');
 
   const parts = rows.map(r => r.data instanceof Uint8Array ? r.data : new Uint8Array(r.data));
   const size = parts.reduce((s, p) => s + p.length, 0);
