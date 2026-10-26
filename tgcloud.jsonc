@@ -1,4 +1,4 @@
 {
-  // The mini app is hosted on GitHub Pages; Serverless only runs the bot and send_file
-  "static": false
+  // Telegram hosting serves only a tiny helper page; the app itself lives on GitHub Pages
+  "static": "bridge"
 }

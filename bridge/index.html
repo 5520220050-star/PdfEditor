@@ -1,0 +1,31 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>bridge</title></head>
+<body>
+<script>
+// Invisible helper: the GitHub-hosted mini app sends requests here with postMessage,
+// and this page (served from the bot's own tgcloud address) calls the Serverless endpoint.
+var ALLOWED = 'https://5520220050-star.github.io';
+addEventListener('message', function (ev) {
+  if (ev.origin !== ALLOWED) return;
+  var m = ev.data || {};
+  if (m.type !== 'call' || !/^[a-z_]+$/.test(m.name || '')) return;
+  fetch('/api/' + m.name, {
+    method: 'POST',
+    headers: { 'Authorization': 'TMA ' + btoa(unescape(encodeURIComponent(m.initData || ''))), 'Content-Type': 'application/json' },
+    body: JSON.stringify(m.input || {}),
+    credentials: 'omit'
+  }).then(function (r) {
+    return r.text().then(function (t) {
+      var d = null; try { d = JSON.parse(t); } catch (e) {}
+      if (!d || typeof d.ok !== 'boolean') return { ok: false, description: 'HTTP ' + r.status, error_type: 'HTTP' };
+      return d;
+    });
+  }, function (e) {
+    return { ok: false, description: 'Network error: ' + (e && e.message), error_type: 'NETWORK' };
+  }).then(function (d) {
+    ev.source.postMessage({ type: 'result', id: m.id, data: d }, ALLOWED);
+  });
+});
+parent.postMessage({ type: 'ready' }, ALLOWED);
+</script>
+</body></html>
