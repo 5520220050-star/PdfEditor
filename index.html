@@ -861,7 +861,10 @@ $('#zipAll').onclick = async () => {
 /* ---------- Send to the Telegram chat (via the bot's Serverless endpoint) ---------- */
 const canSend = () => inTG && TG.Serverless && typeof TG.Serverless.call === 'function';
 function callEndpoint(name, input) {
-  return new Promise((resolve, reject) => TG.Serverless.call(name, input, (err, res) => err ? reject(err) : resolve(res)));
+  return new Promise((resolve, reject) => {
+    try { TG.Serverless.call(name, input, (err, res) => err ? reject(err) : resolve(res)); }
+    catch (e) { reject(e); }
+  });
 }
 function bytesToB64(b) {
   let s = ''; for (let i = 0; i < b.length; i += 32768) s += String.fromCharCode.apply(null, b.subarray(i, i + 32768));
@@ -888,7 +891,10 @@ async function sendToChat(files) {
     if (TG.HapticFeedback) TG.HapticFeedback.notificationOccurred('success');
   } catch (e) {
     busy(false);
-    showErr(e && e.type === 'ENDPOINT_ERROR' ? e.message : 'تعذّر الإرسال إلى المحادثة' + (e && e.type ? ' (' + e.type + ')' : '') + '. استخدم «مشاركة / حفظ» أو «تنزيل».');
+    let detail = '';
+    try { detail = e && (e.type || e.message) ? [e.type, e.message].filter(Boolean).join(': ') : JSON.stringify(e); } catch (x) { detail = String(e); }
+    if (!detail || detail === '{}') detail = String(e);
+    showErr(e && e.type === 'ENDPOINT_ERROR' ? e.message : 'تعذّر الإرسال إلى المحادثة. السبب: ' + detail);
   }
 }
 $('#sendChat').onclick = () => sendToChat(results);
