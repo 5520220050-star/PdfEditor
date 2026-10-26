@@ -121,7 +121,7 @@ input[dir=ltr]{text-align:left}
   <!-- HOME -->
   <section id="home" class="panel on">
     <div class="grid" id="grid"></div>
-    <p class="note">كل المعالجة تتم داخل جهازك. الحد الأقصى لحجم الملف 50 ميغابايت.<br>الإصدار 1.5</p>
+    <p class="note">كل المعالجة تتم داخل جهازك. الحد الأقصى لحجم الملف 50 ميغابايت.<br>الإصدار 1.6</p>
   </section>
 
   <!-- TOOL HOST -->
@@ -902,10 +902,12 @@ function bytesToB64(b) {
   let s = ''; for (let i = 0; i < b.length; i += 32768) s += String.fromCharCode.apply(null, b.subarray(i, i + 32768));
   return btoa(s);
 }
-/* Telegram rejects requests above an unpublished size, so pieces start at 256 KB and are halved
-   automatically whenever a piece is refused; the size that works is remembered for later files. */
-let chunkSize = 256 * 1024;
-const MIN_CHUNK = 8 * 1024;
+/* Telegram refuses bursts of requests (and possibly large ones) without saying why.
+   So pieces are paced, and a refused piece is retried after a growing pause; the piece size is
+   halved on every second refusal (never below 32 KB). Sizes that work are remembered. */
+let chunkSize = 192 * 1024;
+const MIN_CHUNK = 32 * 1024, MAX_TRIES = 9, PACE_MS = 350;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 const sizeRefused = e => e && (e.type === 'HTTP' || e.type === 'INTERNAL' || e.type === 'NETWORK' || e.type === 'TIMEOUT');
 async function sendToChat(files) {
   const msg = $('#sentMsg'); msg.classList.remove('on'); showErr('');
@@ -915,18 +917,25 @@ async function sendToChat(files) {
     for (let k = 0; k < files.length; k++) {
       const f = files[k], bytes = new Uint8Array(await f.blob.arrayBuffer());
       const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
-      let off = 0, index = 0;
+      let off = 0, index = 0, tries = 0;
       while (off < bytes.length || index === 0) {
         busy(true, 'إرسال ' + (files.length > 1 ? 'الملف ' + (k + 1) + ' من ' + files.length + ' — ' : '') + Math.round(off / Math.max(bytes.length, 1) * 100) + '%');
         const end = Math.min(off + chunkSize, bytes.length);
         try {
           await callEndpoint('send_file', { upload_id: id, index, last: end >= bytes.length, name: f.name, mime: f.blob.type, chunk: bytesToB64(bytes.subarray(off, end)) });
         } catch (e) {
-          if (sizeRefused(e) && chunkSize > MIN_CHUNK) { chunkSize = Math.max(MIN_CHUNK, chunkSize >> 1); continue; }
-          e.detail = 'piece ' + (index + 1) + ', ' + Math.round(chunkSize / 1024) + ' KB';
+          tries++;
+          if (sizeRefused(e) && tries < MAX_TRIES) {
+            if (tries % 2 === 0) chunkSize = Math.max(MIN_CHUNK, chunkSize >> 1);
+            const wait = Math.min(1000 * 2 ** (tries - 1), 15000);
+            busy(true, 'الخادم مشغول، إعادة المحاولة بعد ' + Math.round(wait / 1000) + ' ث…');
+            await sleep(wait); continue;
+          }
+          e.detail = 'piece ' + (index + 1) + ', ' + Math.round(chunkSize / 1024) + ' KB, ' + tries + ' tries';
           throw e;
         }
-        off = end; index++;
+        off = end; index++; tries = 0;
+        if (off < bytes.length) await sleep(PACE_MS);
       }
     }
     busy(false);

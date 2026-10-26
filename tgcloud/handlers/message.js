@@ -1,7 +1,7 @@
 import { api } from 'sdk';
 
 // Link to the mini app (GitHub Pages)
-const APP_URL = 'https://5520220050-star.github.io/PdfEditor/?v=15';
+const APP_URL = 'https://5520220050-star.github.io/PdfEditor/?v=16';
 
 const WELCOME = [
   'أهلاً بك في <b>محرر PDF</b> 📄',
