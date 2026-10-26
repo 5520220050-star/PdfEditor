@@ -873,7 +873,7 @@ function bytesToB64(b) {
   let s = ''; for (let i = 0; i < b.length; i += 32768) s += String.fromCharCode.apply(null, b.subarray(i, i + 32768));
   return btoa(s);
 }
-const CHUNK = 1536 * 1024; /* 1.5 MB per request */
+const CHUNK = 256 * 1024; /* 256 KB per request (smaller pieces pass Telegram's request limit) */
 async function sendToChat(files) {
   const msg = $('#sentMsg'); msg.classList.remove('on'); showErr('');
   const tooBig = files.find(f => f.blob.size > MAX_FILE);

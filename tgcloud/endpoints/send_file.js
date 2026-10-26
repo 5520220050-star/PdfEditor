@@ -3,11 +3,20 @@ import { eq, sql } from 'sdk/db';
 import { uploads } from '../schema.js';
 
 const MAX_BYTES = 50 * 1024 * 1024;  // Telegram's limit for bot uploads
-const MAX_PARTS = 40;
+const MAX_PARTS = 400;
 
 // Called by the mini app once per piece of the file (pieces are base64 text).
 // input: { upload_id, index, total, name, mime, chunk }
 export default async function (input, ctx) {
+  try { return await handle(input, ctx); }
+  catch (e) {
+    if (e instanceof EndpointError) throw e;
+    console.error(e);
+    throw new EndpointError('خطأ في الخادم: ' + (e && (e.message || e.description) || String(e)).slice(0, 200));
+  }
+}
+
+async function handle(input, ctx) {
   const user = ctx.initData && ctx.initData.user;
   if (!user) throw new EndpointError('افتح المحرر من داخل البوت.');
 
@@ -54,8 +63,9 @@ async function send(chatId, name, mime, bytes) {
       document: new InputFile(bytes, safeName, { type: String(mime || 'application/pdf') })
     });
   } catch (e) {
+    console.error(e);
     if (e && e.code === 403) throw new EndpointError('اضغط «ابدأ» في البوت أولاً حتى يستطيع إرسال الملفات إليك.');
-    throw new EndpointError('تعذّر إرسال الملف إلى المحادثة.');
+    throw new EndpointError('تعذّر إرسال الملف إلى المحادثة: ' + String(e && (e.description || e.message) || e).slice(0, 200));
   }
   return { ok: true, sent: true };
 }
