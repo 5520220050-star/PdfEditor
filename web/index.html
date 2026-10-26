@@ -64,6 +64,9 @@ input[dir=ltr]{text-align:left}
 .btn{display:block;width:100%;border:0;border-radius:12px;padding:14px;font-weight:700;font-size:16px;background:var(--accent);color:var(--accent-text);cursor:pointer;margin-top:8px}
 .btn.sec{background:var(--card);color:var(--text);border:1px solid var(--line);font-weight:500}
 .btn:disabled{opacity:.45}
+/* Run button stays pinned to the bottom of the screen while the page list scrolls */
+.runbar{position:sticky;bottom:0;z-index:5;margin:0 -16px;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(to bottom,transparent,var(--bg) 35%)}
+.runbar .btn{margin-top:0;box-shadow:0 4px 14px rgba(0,0,0,.18)}
 .mini{border:1px solid var(--line);background:var(--card);border-radius:8px;padding:5px 10px;font-size:13px;cursor:pointer}
 
 /* Page thumbnails */
@@ -789,7 +792,7 @@ function openTool(t) {
   $('#title').textContent = t.ic + ' ' + t.t; showErr(''); $('#result').classList.remove('on');
   const f = $('#form'); f.innerHTML = '';
   const getOpts = t.build(f);
-  const run = h('<button class="btn" type="button">تنفيذ</button>');
+  const bar = h('<div class="runbar"><button class="btn" type="button">تنفيذ</button></div>'), run = $('button', bar);
   run.onclick = async () => {
     showErr(''); $('#result').classList.remove('on');
     try {
@@ -799,7 +802,7 @@ function openTool(t) {
       showResult(results);
     } catch (e) { handleErr(e); } finally { busy(false); }
   };
-  f.appendChild(run);
+  f.appendChild(bar);
   if (inTG) TG.BackButton.show();
   window.scrollTo(0, 0);
 }
